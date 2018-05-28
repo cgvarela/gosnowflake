@@ -1,5 +1,6 @@
-// Example: Set the session parameter in DSN and verify it
-//
+// Example: client session keep alive
+// By default, the token expires in 4 hours if the connection is idle. CLIENT_SESSION_KEEP_ALIVE parameter will
+// have a heartbeat in the background to keep the connection alive by making explicit heartbeats
 package main
 
 import (
@@ -11,10 +12,11 @@ import (
 	"strconv"
 
 	sf "github.com/snowflakedb/gosnowflake"
+	"time"
 )
 
 // getDSN constructs a DSN based on the test connection parameters
-func getDSN(params map[string]*string) (string, *sf.Config, error) {
+func getDSN() (string, *sf.Config, error) {
 	env := func(k string, failOnMissing bool) string {
 		if value := os.Getenv(k); value != "" {
 			return value
@@ -32,6 +34,10 @@ func getDSN(params map[string]*string) (string, *sf.Config, error) {
 	port := env("SNOWFLAKE_TEST_PORT", false)
 	protocol := env("SNOWFLAKE_TEST_PROTOCOL", false)
 
+	params := make(map[string]*string)
+	valueTrue := "true"
+	params["client_session_keep_alive"] = &valueTrue
+
 	portStr, _ := strconv.Atoi(port)
 	cfg := &sf.Config{
 		Account:  account,
@@ -47,48 +53,57 @@ func getDSN(params map[string]*string) (string, *sf.Config, error) {
 	return dsn, cfg, err
 }
 
+func runQuery(db *sql.DB, query string) {
+	rows, err := db.Query(query) // no cancel is allowed
+	if err != nil {
+		log.Fatalf("failed to run a query. %v, err: %v", query, err)
+	}
+	defer rows.Close()
+	var v int
+	for rows.Next() {
+		err := rows.Scan(&v)
+		if err != nil {
+			log.Fatalf("failed to get result. err: %v", err)
+		}
+		if v != 1 {
+			log.Fatalf("failed to get 1. got: %v", v)
+		}
+	}
+	if rows.Err() != nil {
+		fmt.Printf("ERROR: %v\n", rows.Err())
+		return
+	}
+
+}
+
 func main() {
 	if !flag.Parsed() {
 		// enable glog for Go Snowflake Driver
 		flag.Parse()
 	}
 
-	tmfmt := "MM-DD-YYYY"
-	dsn, cfg, err := getDSN(
-		map[string]*string{
-			"TIMESTAMP_OUTPUT_FORMAT": &tmfmt, // session parameter
-		})
+	dsn, cfg, err := getDSN()
 	if err != nil {
 		log.Fatalf("failed to create DSN from Config: %v, err: %v", cfg, err)
 	}
-	if err != nil {
-		log.Fatalf("failed to create DSN from Config: %v, err: %v", cfg, err)
-	}
+
 	db, err := sql.Open("snowflake", dsn)
 	if err != nil {
 		log.Fatalf("failed to connect. %v, err: %v", dsn, err)
 	}
 	defer db.Close()
-	query := "SHOW PARAMETERS LIKE 'TIMESTAMP_OUTPUT_FORMAT'"
-	rows, err := db.Query(query) // no cancel is allowed
-	if err != nil {
-		log.Fatalf("failed to run a query. %v, err: %v", query, err)
-	}
-	defer rows.Close()
-	var v1, v2, v3, v4, v5 string
-	for rows.Next() {
-		err := rows.Scan(&v1, &v2, &v3, &v4, &v5)
-		if err != nil {
-			log.Fatalf("failed to get result. err: %v", err)
-		}
-		if v1 != "TIMESTAMP_OUTPUT_FORMAT" {
-			log.Fatalf("failed to get 1. got: %v", v1)
-		}
-		fmt.Printf("fmt: %v\n", v2)
-	}
-	if rows.Err() != nil {
-		fmt.Printf("ERROR: %v\n", rows.Err())
-		return
-	}
+	query := "SELECT 1"
+	runQuery(db, query)
+
+	time.Sleep(90 * time.Minute)
+
+	runQuery(db, query)
+
+	time.Sleep(4 * time.Hour)
+
+	runQuery(db, query)
+
+	time.Sleep(8 * time.Hour)
+
 	fmt.Printf("Congrats! You have successfully run %v with Snowflake DB!\n", query)
 }

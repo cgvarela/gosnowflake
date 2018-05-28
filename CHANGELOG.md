@@ -1,3 +1,14 @@
+## Version 1.1.6
+
+- Fixed memory leak in the large result set. The chunk of memory is freed as soon as the cursor moved forward.
+- Removed glide dependency in favor of dep #149 (@tjj5036)
+- Fixed username and password URL escape issue #151
+- Added Go 1.10 test.
+
+## Version 1.1.5
+
+- Added externalbrowser authenticator support PR #141, #142 (@tjj5036)
+
 ## Version 1.1.4
 
 - Raise HTTP 403 errors immediately after the authentication failure instead of retry until the timeout. Issue #138 (@dominicbarnes)

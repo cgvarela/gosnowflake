@@ -22,6 +22,10 @@ const (
 	statementTypeIDMultiTableInsert = statementTypeIDDml + int64(0x500)
 )
 
+const (
+	sessionClientSessionKeepAlive = "client_session_keep_alive"
+)
+
 type snowflakeConn struct {
 	cfg            *Config
 	rest           *snowflakeRestful
@@ -122,6 +126,7 @@ func (sc *snowflakeConn) exec(
 	sc.QueryID = data.Data.QueryID
 	sc.SQLState = data.Data.SQLState
 	sc.populateSessionParameters(data.Data.Parameters)
+	sc.startHeartBeat()
 	return data, err
 }
 
@@ -163,6 +168,8 @@ func (sc *snowflakeConn) cleanup() {
 
 func (sc *snowflakeConn) Close() (err error) {
 	glog.V(2).Infoln("Close")
+	sc.stopHeartBeat()
+
 	// ensure transaction is rollbacked
 	_, err = sc.exec(context.Background(), "ROLLBACK", false, false, nil)
 	if err != nil {
@@ -303,4 +310,29 @@ func (sc *snowflakeConn) populateSessionParameters(parameters []nameValueParamet
 		glog.V(3).Infof("parameter. name: %v, value: %v", param.Name, v)
 		sc.cfg.Params[strings.ToLower(param.Name)] = &v
 	}
+}
+
+func (sc *snowflakeConn) isClientSessionKeepAliveEnabled() bool {
+	v, ok := sc.cfg.Params[sessionClientSessionKeepAlive]
+	if !ok {
+		return false
+	}
+	return strings.Compare(*v, "true") == 0
+}
+
+func (sc *snowflakeConn) startHeartBeat() {
+	if !sc.isClientSessionKeepAliveEnabled() {
+		return
+	}
+	sc.rest.HeartBeat = &heartbeat{
+		restful: sc.rest,
+	}
+	sc.rest.HeartBeat.start()
+}
+
+func (sc *snowflakeConn) stopHeartBeat() {
+	if !sc.isClientSessionKeepAliveEnabled() {
+		return
+	}
+	sc.rest.HeartBeat.stop()
 }
